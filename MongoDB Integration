@@ -1,0 +1,226 @@
+// MongoDB Integration Explanation and Examples
+
+// 1. Connection Setup
+// In server.js, we establish a connection to MongoDB
+
+const mongoose = require('mongoose');
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/expense-manager', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log('MongoDB connected'))
+.catch(err => console.error('MongoDB connection error:', err));
+
+// 2. Schema Definition
+// In models/Expense.js, we define the structure of our data
+
+const ExpenseSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  category: {
+    type: String, 
+    required: true,
+    trim: true
+  },
+  date: {
+    type: Date,
+    required: true,
+    default: Date.now
+  },
+  description: {
+    type: String,
+    trim: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// 3. Model Creation
+// This creates a collection in MongoDB called 'expenses'
+const Expense = mongoose.model('Expense', ExpenseSchema);
+
+// 4. CRUD Operations Examples
+
+// CREATE - Inserting a new expense
+// Used in routes/expenses.js in the POST route
+const createExpense = async (expenseData) => {
+  try {
+    const newExpense = new Expense(expenseData);
+    const savedExpense = await newExpense.save();
+    return savedExpense;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// READ - Fetching expenses
+// Used in routes/expenses.js in the GET route
+const getAllExpenses = async () => {
+  try {
+    // Find all expenses and sort by date descending
+    const expenses = await Expense.find().sort({ date: -1 });
+    return expenses;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// READ - Get a single expense by ID
+const getExpenseById = async (id) => {
+  try {
+    const expense = await Expense.findById(id);
+    return expense;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// UPDATE - Modify an expense
+// Used in routes/expenses.js in the PUT route
+const updateExpense = async (id, updates) => {
+  try {
+    const updatedExpense = await Expense.findByIdAndUpdate(
+      id,
+      { $set: updates },
+      { new: true } // Return the updated document
+    );
+    return updatedExpense;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// DELETE - Remove an expense
+// Used in routes/expenses.js in the DELETE route
+const deleteExpense = async (id) => {
+  try {
+    await Expense.findByIdAndDelete(id);
+    return { success: true };
+  } catch (error) {
+    throw error;
+  }
+};
+
+// 5. Advanced Queries with MongoDB Aggregation
+// Used in routes/expenses.js in the stats/summary route
+
+// Get total expenses
+const getTotalExpenses = async () => {
+  try {
+    const result = await Expense.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    return result[0] || { total: 0, count: 0 };
+  } catch (error) {
+    throw error;
+  }
+};
+
+// Get expenses grouped by category
+const getExpensesByCategory = async () => {
+  try {
+    const result = await Expense.aggregate([
+      {
+        $group: {
+          _id: "$category",
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { total: -1 } }
+    ]);
+    return result;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// Get expenses grouped by month
+const getMonthlyExpenses = async () => {
+  try {
+    const result = await Expense.aggregate([
+      {
+        $group: {
+          _id: {
+            year: { $year: "$date" },
+            month: { $month: "$date" }
+          },
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { "_id.year": -1, "_id.month": -1 } }
+    ]);
+    return result;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// 6. Filtering Data Example
+// Get expenses within a date range
+const getExpensesByDateRange = async (startDate, endDate) => {
+  try {
+    const expenses = await Expense.find({
+      date: {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      }
+    }).sort({ date: -1 });
+    return expenses;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// 7. Mongoose Middleware Example
+// This could be added to the ExpenseSchema to perform actions before saving
+ExpenseSchema.pre('save', function(next) {
+  // If no date is provided, use current date
+  if (!this.date) {
+    this.date = new Date();
+  }
+  next();
+});
+
+// 8. MongoDB Atlas Setup Instructions
+/*
+1. Create a MongoDB Atlas account at https://www.mongodb.com/cloud/atlas
+2. Create a new cluster (free tier is available)
+3. Set up database access (username and password)
+4. Configure network access (IP whitelist)
+5. Get your connection string: 
+   mongodb+srv://<username>:<password>@cluster0.mongodb.net/expense-manager
+6. Add this connection string to your .env file as MONGODB_URI
+*/
+
+// 9. Production Deployment with MongoDB
+/*
+When deploying to production:
+1. Ensure your MongoDB connection string is set in environment variables
+2. Set up proper error handling for MongoDB connection failures
+3. Consider implementing connection pooling for better performance
+4. Implement proper indexing for frequently queried fields
+5. Set up MongoDB Atlas monitoring to track performance
+*/
+
+// Example of setting up indexes for better query performance
+// This would be added after creating the schema
+ExpenseSchema.index({ category: 1 }); // Index on category field
+ExpenseSchema.index({ date: -1 });    // Index on date field descending
+ExpenseSchema.index({ title: "text" }); // Text index for search functionality
