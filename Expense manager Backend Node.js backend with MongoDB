@@ -5,6 +5,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const path = require('path');
 
 // Load environment variables
 dotenv.config();
@@ -36,4 +37,285 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-//
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// File: models/Expense.js
+const mongoose = require('mongoose');
+
+const ExpenseSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  category: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  date: {
+    type: Date,
+    required: true,
+    default: Date.now
+  },
+  description: {
+    type: String,
+    trim: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+module.exports = mongoose.model('Expense', ExpenseSchema);
+
+// File: routes/expenses.js
+const express = require('express');
+const router = express.Router();
+const Expense = require('../models/Expense');
+
+// @route   GET api/expenses
+// @desc    Get all expenses
+// @access  Public
+router.get('/', async (req, res) => {
+  try {
+    const expenses = await Expense.find().sort({ date: -1 });
+    res.json(expenses);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   POST api/expenses
+// @desc    Add new expense
+// @access  Public
+router.post('/', async (req, res) => {
+  try {
+    const { title, amount, category, date, description } = req.body;
+
+    // Simple validation
+    if (!title || !amount || !category || !date) {
+      return res.status(400).json({ message: 'Please provide all required fields' });
+    }
+
+    const newExpense = new Expense({
+      title,
+      amount,
+      category,
+      date,
+      description
+    });
+
+    const expense = await newExpense.save();
+    res.json(expense);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/expenses/:id
+// @desc    Get expense by ID
+// @access  Public
+router.get('/:id', async (req, res) => {
+  try {
+    const expense = await Expense.findById(req.params.id);
+    
+    if (!expense) {
+      return res.status(404).json({ message: 'Expense not found' });
+    }
+    
+    res.json(expense);
+  } catch (err) {
+    console.error(err.message);
+    if (err.kind === 'ObjectId') {
+      return res.status(404).json({ message: 'Expense not found' });
+    }
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   PUT api/expenses/:id
+// @desc    Update expense
+// @access  Public
+router.put('/:id', async (req, res) => {
+  try {
+    const { title, amount, category, date, description } = req.body;
+    
+    // Simple validation
+    if (!title || !amount || !category || !date) {
+      return res.status(400).json({ message: 'Please provide all required fields' });
+    }
+    
+    const expenseFields = {
+      title,
+      amount,
+      category,
+      date,
+      description
+    };
+    
+    let expense = await Expense.findById(req.params.id);
+    
+    if (!expense) {
+      return res.status(404).json({ message: 'Expense not found' });
+    }
+    
+    expense = await Expense.findByIdAndUpdate(
+      req.params.id,
+      { $set: expenseFields },
+      { new: true }
+    );
+    
+    res.json(expense);
+  } catch (err) {
+    console.error(err.message);
+    if (err.kind === 'ObjectId') {
+      return res.status(404).json({ message: 'Expense not found' });
+    }
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   DELETE api/expenses/:id
+// @desc    Delete expense
+// @access  Public
+router.delete('/:id', async (req, res) => {
+  try {
+    const expense = await Expense.findById(req.params.id);
+    
+    if (!expense) {
+      return res.status(404).json({ message: 'Expense not found' });
+    }
+    
+    await expense.remove();
+    res.json({ message: 'Expense removed' });
+  } catch (err) {
+    console.error(err.message);
+    if (err.kind === 'ObjectId') {
+      return res.status(404).json({ message: 'Expense not found' });
+    }
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/expenses/stats/summary
+// @desc    Get expense statistics and summary
+// @access  Public
+router.get('/stats/summary', async (req, res) => {
+  try {
+    // Get total expenses
+    const totalExpenses = await Expense.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    
+    // Get expenses by category
+    const expensesByCategory = await Expense.aggregate([
+      {
+        $group: {
+          _id: "$category",
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { total: -1 } }
+    ]);
+    
+    // Get monthly expenses
+    const monthlyExpenses = await Expense.aggregate([
+      {
+        $group: {
+          _id: {
+            year: { $year: "$date" },
+            month: { $month: "$date" }
+          },
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { "_id.year": -1, "_id.month": -1 } }
+    ]);
+    
+    res.json({
+      total: totalExpenses[0] || { total: 0, count: 0 },
+      categories: expensesByCategory,
+      monthly: monthlyExpenses
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+module.exports = router;
+
+// File: config/db.js
+const mongoose = require('mongoose');
+const config = require('config');
+const db = process.env.MONGODB_URI || config.get('mongoURI');
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(db, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      useCreateIndex: true,
+      useFindAndModify: false
+    });
+    
+    console.log('MongoDB Connected...');
+  } catch (err) {
+    console.error(err.message);
+    // Exit process with failure
+    process.exit(1);
+  }
+};
+
+module.exports = connectDB;
+
+// File: .env (example)
+MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/expense-manager
+PORT=5000
+NODE_ENV=development
+
+// File: package.json
+{
+  "name": "expense-manager-backend",
+  "version": "1.0.0",
+  "description": "Backend for Expense Manager application",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "server": "nodemon server.js",
+    "client": "npm start --prefix client",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "heroku-postbuild": "NPM_CONFIG_PRODUCTION=false npm install --prefix client && npm run build --prefix client"
+  },
+  "author": "Akshat and Saarthak",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1",
+    "mongoose": "^6.0.10",
+    "config": "^3.3.6"
+  },
+  "devDependencies": {
+    "concurrently": "^6.3.0",
+    "nodemon": "^2.0.13"
+  }
+}
